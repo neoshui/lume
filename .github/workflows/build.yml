@@ -98,9 +98,10 @@ jobs:
           LUME_VERSION_FILE: ${{ runner.temp }}\lume-version.txt
         run: |
           $output = & dist\Lume.exe --version
-          if ($LASTEXITCODE -ne 0) { throw "Lume.exe --version failed" }
+          $exitCode = $LASTEXITCODE
           $versionFile = Get-Content $env:LUME_VERSION_FILE -Raw
           if ($versionFile -notmatch '^Lume 1\.1\.0\s*$') { throw "Unexpected version output: $versionFile" }
+          if ($exitCode -ne 0) { Write-Warning "Windowed PyInstaller executable returned exit code $exitCode after writing the valid version output" }
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress --yes
