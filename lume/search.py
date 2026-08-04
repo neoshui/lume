@@ -366,6 +366,8 @@ $apps | ConvertTo-Json -Compress -Depth 3
             check=True,
         )
         parsed = json.loads(result.stdout.strip() or "[]")
+        if not parsed:
+            return {}
         if isinstance(parsed, dict):
             parsed = [parsed]
         mapping = {}
