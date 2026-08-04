@@ -113,7 +113,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (python scripts/validate_version.py).Trim()
-          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" installer\Lume.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" installer\Lume.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
           if (!(Test-Path release\Lume-windows-x86_64-Setup.exe)) { throw "Installer was not created" }
       - uses: actions/upload-artifact@v4
