@@ -34,6 +34,10 @@ def _emit_cli_output(value: str) -> None:
             Path(output_file).write_text(value + "\n", encoding="utf-8")
         except OSError:
             pass
+    if sys.platform == "win32" and getattr(sys, "frozen", False):
+        # The Windows ``--windowed`` bootloader exposes a stdout wrapper that
+        # can fail during interpreter shutdown even when print() succeeds.
+        return
     try:
         print(value)
     except (AttributeError, OSError, ValueError):
