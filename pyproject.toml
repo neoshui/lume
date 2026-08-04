@@ -1,0 +1,24 @@
+[project]
+name = "lume-launcher"
+version = "1.1.0"
+description = "Lume — 浮光 GNOME 启动器"
+readme = "DEVELOPMENT.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.8",
+    "pypinyin>=0.55",
+]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lume*"]
+
+[tool.setuptools.package-data]
+lume = ["resources/*"]
+
+[project.scripts]
+lume = "lume.qt_app:run"

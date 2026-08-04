@@ -1,0 +1,16 @@
+/* Lume GNOME Launcher - 外部 Fallback CSS
+ *
+ * 主样式由 launcher.py 的 _build_css_string() 动态生成（基于配置）。
+ * 该文件作为 Gtk.Application 路径（run.py → app.py）的 fallback，
+ * 确保窗口在动态 CSS 生效前有合理的默认样式。
+ */
+
+window.launcher-window {
+    background: transparent;
+}
+
+/* 搜索结果选中高亮 — 当主题 CSS 尚未加载时提供基础样式 */
+.launcher-box .result-row:selected,
+.results-list row:selected {
+    background-color: rgba(91, 127, 255, 0.15);
+}

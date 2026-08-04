@@ -1,0 +1,7 @@
+{
+  "uuid": "lume-clipboard@lume.app",
+  "name": "Lume Clipboard Bridge",
+  "description": "Lume's private GNOME Wayland clipboard-history backend.",
+  "version": 2,
+  "shell-version": ["50"]
+}

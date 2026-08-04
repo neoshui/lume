@@ -1,0 +1,3 @@
+#!/bin/sh
+cd /home/neoshui/下载/hermesProject/fuguang-gnome || exit 1
+exec .venv/bin/python main.py >> /tmp/lume_desktop.log 2>&1

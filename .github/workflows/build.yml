@@ -1,0 +1,136 @@
+name: Build and Release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  PYSIDE6_VERSION: "6.11.1"
+  PYINSTALLER_VERSION: "6.21.0"
+  PYPY_PINYIN_VERSION: "0.55.0"
+
+jobs:
+  test-linux:
+    name: Linux tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check "PySide6==${PYSIDE6_VERSION}" "pypinyin==${PYPY_PINYIN_VERSION}"
+      - name: Validate project version
+        run: python scripts/validate_version.py
+      - name: Validate release tag
+        run: python scripts/validate_version.py --tag "${GITHUB_REF_NAME}"
+        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          HOME: ${{ runner.temp }}/lume-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/lume-config
+          XDG_DATA_HOME: ${{ runner.temp }}/lume-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/lume-cache
+        run: python -m unittest discover -s tests -q
+      - name: Compile Python sources
+        run: python -m compileall -q main.py lume tests
+      - name: Check shell and extension syntax
+        run: |
+          bash -n build_linux.sh scripts/install.sh scripts/uninstall.sh scripts/install_lume_shell_extension.sh
+          node --check lume_shell_extension/extension.js
+
+  build-linux:
+    name: Linux package
+    needs: test-linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Linux package
+        run: bash build_linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lume-linux
+          path: release/Lume-linux-x86_64
+          if-no-files-found: error
+
+  build-windows:
+    name: Windows package and installer
+    needs: test-linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check "PySide6==${{ env.PYSIDE6_VERSION }}" "PyInstaller==${{ env.PYINSTALLER_VERSION }}" "pypinyin==${{ env.PYPY_PINYIN_VERSION }}" "Pillow>=10"
+      - name: Validate project version
+        shell: pwsh
+        run: python scripts/validate_version.py
+      - name: Validate release tag
+        shell: pwsh
+        run: python scripts/validate_version.py --tag "$env:GITHUB_REF_NAME"
+        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Build executable
+        shell: pwsh
+        run: |
+          python scripts/create_windows_icon.py
+          python -m PyInstaller --clean Lume.spec
+          if (!(Test-Path dist\Lume.exe)) { throw "dist\Lume.exe was not created" }
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item dist\Lume.exe release\Lume-windows-x86_64-portable.exe -Force
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $output = & dist\Lume.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "Lume.exe --version failed" }
+          if ($output -notmatch '^Lume ') { throw "Unexpected version output: $output" }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress --yes
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = (python scripts/validate_version.py).Trim()
+          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" installer\Lume.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          if (!(Test-Path release\Lume-windows-x86_64-Setup.exe)) { throw "Installer was not created" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lume-windows
+          path: |
+            release/Lume-windows-x86_64-portable.exe
+            release/Lume-windows-x86_64-Setup.exe
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir release-files
+          find artifacts -type f -exec cp {} release-files/ \;
+          prerelease_flag=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease_flag="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" release-files/* \
+            --title "Lume $GITHUB_REF_NAME" \
+            --generate-notes $prerelease_flag
