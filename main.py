@@ -28,12 +28,6 @@ sys.path.insert(0, project_root)
 
 def _emit_cli_output(value: str) -> None:
     """Emit CLI output without crashing a windowed PyInstaller executable."""
-    output_file = os.environ.get("LUME_VERSION_FILE")
-    if output_file:
-        try:
-            Path(output_file).write_text(value + "\n", encoding="utf-8")
-        except OSError:
-            pass
     if sys.platform == "win32" and getattr(sys, "frozen", False):
         # The Windows ``--windowed`` bootloader exposes a stdout wrapper that
         # can fail during interpreter shutdown even when print() succeeds.

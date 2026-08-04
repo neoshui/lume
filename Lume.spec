@@ -1,10 +1,12 @@
 """Shared PyInstaller configuration for the platform-specific runners."""
 
 from pathlib import Path
+import os
 import sys
 
 
 project_root = Path(SPECPATH)
+console_mode = os.environ.get("LUME_CONSOLE") == "1"
 datas = [
     (str(project_root / "lume-128.png"), "."),
     (str(project_root / "lume-256.png"), "."),
@@ -50,14 +52,14 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Lume',
+    name='LumeSmoke' if console_mode else 'Lume',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=console_mode,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
