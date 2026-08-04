@@ -94,10 +94,13 @@ jobs:
           Copy-Item dist\Lume.exe release\Lume-windows-x86_64-portable.exe -Force
       - name: Smoke test executable
         shell: pwsh
+        env:
+          LUME_VERSION_FILE: ${{ runner.temp }}\lume-version.txt
         run: |
           $output = & dist\Lume.exe --version
           if ($LASTEXITCODE -ne 0) { throw "Lume.exe --version failed" }
-          if ($output -notmatch '^Lume ') { throw "Unexpected version output: $output" }
+          $versionFile = Get-Content $env:LUME_VERSION_FILE -Raw
+          if ($versionFile -notmatch '^Lume 1\.1\.0\s*$') { throw "Unexpected version output: $versionFile" }
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress --yes

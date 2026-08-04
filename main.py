@@ -4,6 +4,7 @@
 import os
 import sys
 import argparse
+from pathlib import Path
 # On Wayland, try native platform plugin (for multi-monitor
 # via QWindow::setScreen).  Only fall back to xcb/XWayland when
 # the Wayland plugin is unavailable but DISPLAY is set.
@@ -24,6 +25,25 @@ if os.environ.get("XDG_SESSION_TYPE") == "wayland" and "QT_QPA_PLATFORM" not in 
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
+
+def _emit_cli_output(value: str) -> None:
+    """Emit CLI output without crashing a windowed PyInstaller executable."""
+    output_file = os.environ.get("LUME_VERSION_FILE")
+    if output_file:
+        try:
+            Path(output_file).write_text(value + "\n", encoding="utf-8")
+        except OSError:
+            pass
+    try:
+        print(value)
+    except (AttributeError, OSError, ValueError):
+        # ``--windowed`` builds may expose a non-writable stdout handle.
+        try:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            pass
+
+
 def _cli(argv: list[str]) -> int | None:
     from lume.version import VERSION
     parser = argparse.ArgumentParser(prog="lume", description="Lume 浮光启动器")
@@ -34,7 +54,7 @@ def _cli(argv: list[str]) -> int | None:
     if unknown:
         parser.error(f"未知参数: {' '.join(unknown)}")
     if args.version:
-        print(f"Lume {VERSION}")
+        _emit_cli_output(f"Lume {VERSION}")
         return 0
     if args.diagnose:
         from lume.diagnostics import format_diagnostics
