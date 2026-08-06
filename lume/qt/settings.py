@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 
 from lume.log_utils import get_logger
+from lume.autostart import is_autostart_enabled
+from lume.desktop import detect_desktop
 from lume.qt.shell_extension import install_and_enable, is_enabled
 from lume.version import VERSION
 
@@ -313,8 +315,13 @@ class TabbedSettingsDialog(QDialog):
         form.addRow("单条文本上限", self.clipboard_text_limit)
         form.addRow("单张图片上限（MB）", self.clipboard_image_limit)
         form.addRow(self.clipboard_filter_sensitive); form.addRow(hint)
+        startup_card, startup_form = self._settings_card("启动设置", "控制当前用户登录系统后是否在后台启动 Lume")
+        self.autostart = QCheckBox("登录系统后自动启动 Lume")
+        self.autostart.setChecked(is_autostart_enabled())
+        startup_form.addRow(self.autostart)
+        root.addWidget(startup_card)
         root.addWidget(card)
-        if sys.platform == "linux":
+        if detect_desktop().needs_gnome_extension:
             clip_card, clip_form = self._settings_card("GNOME 剪切板组件", "用于 Wayland 下可靠保存后台文本和截图历史")
             self.shell_clipboard_status = QLabel()
             install_shell = QPushButton("安装并启用")
@@ -506,6 +513,7 @@ class TabbedSettingsDialog(QDialog):
                        "clipboard_max_text_length": self.clipboard_text_limit.value(),
                        "clipboard_max_image_bytes": self.clipboard_image_limit.value() * 1024 * 1024,
                        "clipboard_filter_sensitive": self.clipboard_filter_sensitive.isChecked(),
+                       "autostart": self.autostart.isChecked(),
                        # Privacy mode is intentionally controlled from the
                        # clipboard footer for quick, visible access.
                        "clipboard_private_mode": self.config.get("clipboard_private_mode", False),

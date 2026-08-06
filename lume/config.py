@@ -20,6 +20,8 @@ DEFAULT_CONFIG = {
     # Valid modifiers: CTRL, ALT, SHIFT, LOGO (Super), NUM (mod2)
     # Key names: space, a-z, Return, Tab, Escape, F1-F12, etc.
     "shortcut": "ALT+space",
+    # Start Lume in the background when the user logs in.
+    "autostart": False,
     # Launcher window settings
     "launcher_width": 680,
     "launcher_height": 720,

@@ -8,6 +8,7 @@ import platform
 from pathlib import Path
 
 from lume.config import CONFIG_FILE, DATA_DIR
+from lume.desktop import detect_desktop
 from lume.qt.shell_extension import UUID, is_enabled, target_dir
 from lume.version import runtime_identity
 
@@ -48,13 +49,16 @@ def _lume_processes() -> list[dict[str, str]]:
 
 def collect() -> dict[str, object]:
     identity = runtime_identity()
+    desktop = detect_desktop()
     return {
         "identity": identity,
         "platform": {
             "system": platform.system(),
             "release": platform.release(),
-            "desktop": os.environ.get("XDG_CURRENT_DESKTOP", ""),
-            "session": os.environ.get("XDG_SESSION_TYPE", ""),
+            "desktop": desktop.desktop,
+            "session": desktop.session,
+            "gnome_extension_applicable": desktop.needs_gnome_extension,
+            "clipboard_backend": desktop.clipboard_backend,
         },
         "paths": {"config": str(CONFIG_FILE), "data": str(DATA_DIR)},
         "extension": _extension_state(),

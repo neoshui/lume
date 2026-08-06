@@ -48,6 +48,7 @@ def _cli(argv: list[str]) -> int | None:
     parser.add_argument("--version", action="store_true", help="显示版本")
     parser.add_argument("--diagnose", action="store_true", help="输出运行诊断信息")
     parser.add_argument("--reset-config", action="store_true", help="重置用户配置")
+    parser.add_argument("--background", action="store_true", help="后台启动，不显示主窗口")
     args, unknown = parser.parse_known_args(argv[1:])
     if unknown:
         parser.error(f"未知参数: {' '.join(unknown)}")

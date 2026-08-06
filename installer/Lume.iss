@@ -32,5 +32,11 @@ Source: "..\dist\Lume.exe"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\Lume"; Filename: "{app}\{#MyAppExeName}"
 
+[Tasks]
+Name: "autostart"; Description: "登录 Windows 后自动启动 Lume（后台运行）"; GroupDescription: "启动选项:"; Flags: unchecked
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Lume"; ValueData: """{app}\{#MyAppExeName}"" --background"; Flags: uninsdeletevalue; Tasks: autostart
+
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 Lume"; Flags: nowait postinstall skipifsilent

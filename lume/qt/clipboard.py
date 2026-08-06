@@ -14,6 +14,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
 from lume.config import get_data_dir
+from lume.desktop import detect_desktop
 from lume.log_utils import get_logger
 from lume.qt.shell_extension import is_enabled
 
@@ -125,6 +126,8 @@ class ClipboardStore(QObject):
 
     def _sync_shell_history(self) -> bool:
         """Load history captured by Lume's own GNOME Shell component."""
+        if not detect_desktop().needs_gnome_extension:
+            return False
         if not SHELL_HISTORY_FILE.is_file():
             return False
         if not is_enabled():

@@ -34,9 +34,14 @@ def is_enabled() -> bool:
         # An extension can be listed as enabled while its enable() method has
         # already thrown.  Treat ERROR as unavailable so the UI does not tell
         # the user that background clipboard capture is working when it is not.
-        if result.returncode == 0 and "State: ACTIVE" in result.stdout:
+        state = ""
+        for line in result.stdout.splitlines():
+            if line.strip().lower().startswith("state:"):
+                state = line.split(":", 1)[1].strip().upper()
+                break
+        if state == "ACTIVE":
             return True
-        if result.returncode == 0 and "State: ERROR" in result.stdout:
+        if state in {"ERROR", "DISABLED", "INACTIVE"}:
             return False
 
         # GNOME 50 can return status 2 with no output from the extensions
@@ -48,7 +53,17 @@ def is_enabled() -> bool:
             ["gnome-extensions", "list"],
             capture_output=True, text=True, timeout=3, check=False,
         )
-        if listed.returncode != 0 or UUID not in listed.stdout.splitlines():
+        # Some GNOME/dconf setups return status 2 while still printing a
+        # complete, usable extension list.  The output is the useful signal
+        # here; do not discard it solely because of the exit status.
+        listed_names = listed.stdout.splitlines()
+        if listed_names and UUID not in listed_names:
+            return False
+        # If the CLI produced no usable output (for example, GNOME returns
+        # status 2 from a non-D-Bus-capable helper process), continue with the
+        # persistent gsettings state below instead of reporting a false
+        # negative.
+        if not listed_names and listed.returncode == 0:
             return False
         settings = subprocess.run(
             ["gsettings", "get", "org.gnome.shell", "enabled-extensions"],

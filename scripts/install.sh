@@ -4,6 +4,19 @@
 
 set -e
 
+AUTOSTART_MODE="preserve"
+for arg in "$@"; do
+    case "$arg" in
+        --autostart) AUTOSTART_MODE="enable" ;;
+        --no-autostart) AUTOSTART_MODE="disable" ;;
+        --help|-h)
+            echo "用法: $0 [--autostart|--no-autostart]"
+            exit 0
+            ;;
+        *) echo "未知参数: $arg" >&2; exit 2 ;;
+    esac
+done
+
 PROJECT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 BINARY="$PROJECT_DIR/release/Lume-linux-x86_64"
 ICON="lume-256.png"
@@ -13,6 +26,8 @@ ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
 ICON_TARGET="$ICON_DIR/com.lume.launcher.png"
 DESKTOP_DIR="$HOME/.local/share/applications"
 DESKTOP_TARGET="$DESKTOP_DIR/com.lume.launcher.desktop"
+AUTOSTART_DIR="$HOME/.config/autostart"
+AUTOSTART_TARGET="$AUTOSTART_DIR/com.lume.launcher.desktop"
 
 echo "===== Lume 安装 ====="
 
@@ -50,6 +65,25 @@ Categories=Utility;
 Terminal=false
 EOF
 echo "[3/4] .desktop -> $DESKTOP_TARGET"
+
+if [ "$AUTOSTART_MODE" = "enable" ]; then
+    mkdir -p "$AUTOSTART_DIR"
+    cat > "$AUTOSTART_TARGET" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Lume
+Comment=Lume launcher background service
+Exec=$INSTALL_DIR/Lume --background
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+Hidden=false
+Terminal=false
+EOF
+    echo "      登录启动 -> $AUTOSTART_TARGET"
+elif [ "$AUTOSTART_MODE" = "disable" ]; then
+    rm -f "$AUTOSTART_TARGET"
+    echo "      已关闭登录启动"
+fi
 
 if command -v gnome-extensions >/dev/null 2>&1 && [ -x "$PROJECT_DIR/scripts/install_lume_shell_extension.sh" ]; then
     "$PROJECT_DIR/scripts/install_lume_shell_extension.sh" || echo "警告: GNOME 剪贴板扩展安装失败，请在 Lume 设置中重试。"

@@ -418,6 +418,32 @@ release/
 ./release/Lume-linux-x86_64
 ```
 
+安装到当前用户目录（不需要 sudo）：
+
+```bash
+bash scripts/install.sh
+```
+
+安装时可选登录启动。登录启动只驻留后台，不会自动弹出搜索窗口：
+
+```bash
+bash scripts/install.sh --autostart
+# 或明确关闭
+bash scripts/install.sh --no-autostart
+```
+
+安装后也可以在 Lume 设置 → 快捷键 → 启动设置中切换“登录系统后自动启动 Lume”。
+Linux 使用 `~/.config/autostart/com.lume.launcher.desktop`，Windows 安装器使用当前用户的
+`HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`，均不需要管理员权限。
+
+开机启动使用后台参数：
+
+```bash
+Lume --background
+```
+
+它会启动剪贴板服务和系统托盘，但不会显示主窗口；主窗口仍由全局快捷键呼出。
+
 或移动到系统路径：
 
 ```bash
@@ -474,7 +500,7 @@ Lume-windows-x86_64-Setup.exe
 Lume-linux-x86_64
 ```
 
-Windows 安装器默认安装到用户目录，不修改 PATH，不设置开机启动，也不会删除用户配置或剪贴板历史数据。
+Windows 安装器默认安装到用户目录，不修改 PATH；安装向导可选当前用户登录启动，设置中也可以随时切换。卸载不会删除用户配置或剪贴板历史数据。
 
 ### 安装/卸载
 

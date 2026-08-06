@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from lume.config import get_data_dir, load_config, save_config
+from lume.autostart import set_autostart
+from lume.desktop import detect_desktop
 from lume.log_utils import get_logger
 from lume.qt.utils import (
     _mix, _qcolor, _rgb_text, _icon, _fallback_icon, register_gnome_shortcut,
@@ -42,9 +44,10 @@ APP_SERVER_NAME = "com.lume.launcher.qt"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 class LumeWindow(QMainWindow):
-    def __init__(self, app: QApplication):
+    def __init__(self, app: QApplication, background: bool = False):
         super().__init__()
         self.app = app
+        self.background = background
         self.config = load_config()
         self.results: list[SearchResult] = []
         self.preview = QLabel()
@@ -171,11 +174,12 @@ class LumeWindow(QMainWindow):
         self.refresh_clipboard()
         self.apply_config()
         self.refresh_results()
-        QTimer.singleShot(350, self._offer_shell_clipboard_component)
+        if not self.background:
+            QTimer.singleShot(350, self._offer_shell_clipboard_component)
 
     def _offer_shell_clipboard_component(self):
         """Offer the one-click GNOME component only where it is required."""
-        if sys.platform != "linux" or not os.environ.get("WAYLAND_DISPLAY") or is_enabled():
+        if not detect_desktop().needs_gnome_extension or is_enabled():
             return
         dialog = QMessageBox(self)
         dialog.setIcon(QMessageBox.Icon.Information)
@@ -624,7 +628,8 @@ class LumeWindow(QMainWindow):
         if row is not None:
             row.addStretch(1)
         self.clip_content.adjustSize()
-        provider = "GNOME 扩展" if is_enabled() else "当前剪贴板"
+        desktop = detect_desktop()
+        provider = "GNOME 扩展" if desktop.needs_gnome_extension and is_enabled() else "Qt 剪贴板"
         self.status_label.setText(
             f"剪贴板 {len(self.store.entries)}/{self.store.max_entries} · {provider} · {self.config.get('shortcut', 'ALT+Space')} · Lume {VERSION}"
         )
@@ -698,7 +703,13 @@ class LumeWindow(QMainWindow):
         finally:
             self._settings_open = False
         if result == QDialog.DialogCode.Accepted:
-            self.config = dialog.values()
+            result_config = dialog.values()
+            desired_autostart = bool(result_config.get("autostart", False))
+            autostart_ok, autostart_message = set_autostart(desired_autostart)
+            if not autostart_ok:
+                QMessageBox.warning(self, "启动设置", autostart_message)
+                result_config["autostart"] = bool(self.config.get("autostart", False))
+            self.config = result_config
             if self.config.get("color_theme") in list_themes():
                 custom_appearance = dict(self.config.get("appearance", {}))
                 apply_theme(self.config, self.config["color_theme"])
@@ -808,6 +819,7 @@ class LumeWindow(QMainWindow):
 
 def run(argv=None) -> int:
     argv = argv or sys.argv
+    background = "--background" in argv
     app = QApplication(argv)
     app.setApplicationName("Lume")
     app.setApplicationDisplayName("Lume")
@@ -816,7 +828,7 @@ def run(argv=None) -> int:
     socket = QLocalSocket()
     socket.connectToServer(APP_SERVER_NAME)
     if socket.waitForConnected(150):
-        socket.write(b"toggle")
+        socket.write(b"background" if background else b"toggle")
         socket.waitForBytesWritten(150)
         return 0
 
@@ -826,16 +838,19 @@ def run(argv=None) -> int:
         QMessageBox.critical(None, "Lume", f"无法创建单实例服务：{server.errorString()}")
         return 1
 
-    window = LumeWindow(app)
+    window = LumeWindow(app, background=background)
 
     def accept_connection():
         connection = server.nextPendingConnection()
         if connection:
             connection.waitForReadyRead(100)
-            if connection.readAll() == b"toggle":
+            if bytes(connection.readAll()) == b"toggle":
                 window.toggle()
             connection.disconnectFromServer()
 
     server.newConnection.connect(accept_connection)
-    window.show_launcher()
+    if background:
+        window._dismiss()
+    else:
+        window.show_launcher()
     return app.exec()
