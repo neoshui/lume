@@ -71,6 +71,47 @@ def _locale_key() -> str:
     return "|".join(os.environ.get(name, "") for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"))
 
 
+def _linux_application_dirs() -> list[Path]:
+    """Return desktop-entry directories in XDG lookup order.
+
+    Flatpak exports launchers outside the traditional /usr/share tree.  Some
+    desktop sessions include those roots in XDG_DATA_DIRS, but packaged apps
+    cannot rely on inheriting that environment, so include the standard
+    Flatpak export locations explicitly as well.
+    """
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    data_dirs = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep)
+    roots = [
+        data_home,
+        Path.home() / ".local/share/flatpak/exports/share",
+        *(Path(root) for root in data_dirs if root),
+        Path("/var/lib/flatpak/exports/share"),
+    ]
+
+    application_dirs = []
+    seen = set()
+    for root in roots:
+        directory = root / "applications"
+        key = os.path.normpath(str(directory))
+        if key in seen:
+            continue
+        seen.add(key)
+        application_dirs.append(directory)
+    return application_dirs
+
+
+def _desktop_launch_env() -> dict[str, str]:
+    """Build an environment in which launchers can resolve Flatpak app IDs."""
+    env = os.environ.copy()
+    data_dirs = [
+        str(Path.home() / ".local/share/flatpak/exports/share"),
+        *(root for root in (env.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(os.pathsep) if root),
+        "/var/lib/flatpak/exports/share",
+    ]
+    env["XDG_DATA_DIRS"] = os.pathsep.join(dict.fromkeys(data_dirs))
+    return env
+
+
 def _load_apps():
     """Load all installed desktop applications."""
     global _app_cache, _app_cache_loaded, _app_cache_locale
@@ -111,11 +152,7 @@ def _load_apps_from_desktop_files():
     """Fallback app discovery for environments without PyGObject."""
     import configparser
 
-    roots = [
-        Path.home() / ".local/share/applications",
-        Path("/usr/local/share/applications"),
-        Path("/usr/share/applications"),
-    ]
+    roots = _linux_application_dirs()
 
     # Windows Start Menu shortcuts
     if sys.platform == "win32":
@@ -904,6 +941,7 @@ def launch_app(app_id: str):
             ["gtk-launch", app_id],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=_desktop_launch_env(),
         )
         return True
     except FileNotFoundError:

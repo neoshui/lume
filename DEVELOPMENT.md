@@ -117,7 +117,7 @@ main.py / run.py / main_qt.py
 
 ### 应用语言
 
-- 无 PyGObject 时直接解析 `/usr/share/applications`、`/usr/local/share/applications` 和用户 `.desktop` 文件。
+- 无 PyGObject 时按 XDG 数据目录直接解析 `.desktop` 文件，并显式扫描用户级与系统级 Flatpak export 目录。
 - 本地化字段优先级：`LANGUAGE`、`LC_MESSAGES`、`LANG`、Python locale。
 - 忽略 `C` / `POSIX`，支持 `Name[zh_CN]` → `Name[zh]` → `Name` 回退。
 - 应用缓存绑定语言环境 `_locale_key()`；语言环境变化后会重新加载。
