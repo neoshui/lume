@@ -167,9 +167,20 @@ def _load_apps_from_desktop_files():
         for desktop_file in root.glob("*.desktop"):
             if desktop_file.name in seen:
                 continue
+            if not desktop_file.is_file():
+                # Dangling symlinks (leftovers from APM/Flatpak/app installers
+                # that removed their payload) resolve to nothing.  configparser
+                # silently ignores unreadable files, which would leave the
+                # parser empty and turn ``parser["Desktop Entry"]`` into a
+                # crash during startup indexing.
+                continue
             parser = configparser.ConfigParser(interpolation=None, strict=False)
             try:
                 parser.read(desktop_file, encoding="utf-8")
+                if not parser.has_section("Desktop Entry"):
+                    # Malformed or truncated launcher; skip it instead of
+                    # taking the whole application index down.
+                    continue
                 entry = parser["Desktop Entry"]
                 if entry.get("Type", "Application") != "Application":
                     continue
@@ -208,7 +219,7 @@ def _load_apps_from_desktop_files():
                     "description": localized("Comment"),
                     "icon": entry.get("Icon", ""),
                 })
-            except (configparser.Error, OSError, UnicodeError):
+            except (configparser.Error, OSError, UnicodeError, ValueError, KeyError):
                 continue
     _app_cache.sort(key=lambda app: app["name"].lower())
 
