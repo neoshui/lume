@@ -59,10 +59,14 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Linux package
         run: bash build_linux.sh
+      - name: Build Debian package
+        run: bash scripts/build_deb.sh
       - uses: actions/upload-artifact@v4
         with:
           name: lume-linux
-          path: release/Lume-linux-x86_64
+          path: |
+            release/Lume-linux-x86_64
+            release/Lume_*.deb
           if-no-files-found: error
 
   build-windows:
@@ -143,6 +147,10 @@ jobs:
           find artifacts/lume-windows -type f -size +0c -exec cp {} release-files/ \;
           prerelease_flag=""
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease_flag="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" release-files/* \
-            --title "Lume $GITHUB_REF_NAME" \
-            --generate-notes $prerelease_flag
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-files/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-files/* \
+              --title "Lume $GITHUB_REF_NAME" \
+              --generate-notes $prerelease_flag
+          fi
