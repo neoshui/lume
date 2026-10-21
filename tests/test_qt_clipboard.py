@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,9 +18,17 @@ class ClipboardStoreTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication(sys.argv)
         cls.shell_provider_patch = patch.object(clip_module, "is_enabled", return_value=True)
         cls.shell_provider_patch.start()
+        # Shell-history behavior must be tested deterministically on CI hosts
+        # that do not run GNOME Wayland.
+        cls.desktop_patch = patch.object(
+            clip_module, "detect_desktop",
+            return_value=SimpleNamespace(needs_gnome_extension=True),
+        )
+        cls.desktop_patch.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls.desktop_patch.stop()
         cls.shell_provider_patch.stop()
 
     def test_capture_keeps_text_and_image_history(self):
