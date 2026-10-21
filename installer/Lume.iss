@@ -1,6 +1,6 @@
 ; Lume Windows installer. The project version is supplied by /DMyAppVersion=...
 #ifndef MyAppVersion
-  #define MyAppVersion "1.1.0"
+  #define MyAppVersion "1.1.1"
 #endif
 
 #define MyAppName "Lume"

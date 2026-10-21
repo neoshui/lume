@@ -22,7 +22,7 @@ class SettingsWindow(Gtk.Window):
 
     def __init__(self, parent_window=None, on_save=None, suspend_shortcut=None,
                  resume_shortcut=None, on_close=None):
-        super().__init__(title="浮光启动器设置")
+        super().__init__(title="Lume 设置")
         self._on_save = on_save
         self._on_close = on_close
         self._closed_notified = False
@@ -47,8 +47,8 @@ class SettingsWindow(Gtk.Window):
         self.set_child(vbox)
 
         # Title
-        title = Gtk.Label(label="浮光启动器设置")
-        title.set_markup("<b>浮光启动器设置</b>")
+        title = Gtk.Label(label="Lume 设置")
+        title.set_markup("<b>Lume 设置</b>")
         title.set_halign(Gtk.Align.START)
         title.set_margin_bottom(20)
         vbox.append(title)

@@ -104,7 +104,7 @@ jobs:
           python -m PyInstaller --clean --distpath smoke-dist --workpath smoke-build Lume.spec
           $output = & smoke-dist\LumeSmoke.exe --version
           if ($LASTEXITCODE -ne 0) { throw "LumeSmoke.exe --version failed" }
-          if ($output -notmatch '^Lume 1\.1\.0\s*$') { throw "Unexpected version output: $output" }
+          if ($output -notmatch '^Lume 1\.1\.1\s*$') { throw "Unexpected version output: $output" }
           Remove-Item Env:LUME_CONSOLE
       - name: Install Inno Setup
         shell: pwsh

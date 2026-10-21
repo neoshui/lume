@@ -44,7 +44,7 @@ def _emit_cli_output(value: str) -> None:
 
 def _cli(argv: list[str]) -> int | None:
     from lume.version import VERSION
-    parser = argparse.ArgumentParser(prog="lume", description="Lume 浮光启动器")
+    parser = argparse.ArgumentParser(prog="lume", description="Lume 桌面启动器")
     parser.add_argument("--version", action="store_true", help="显示版本")
     parser.add_argument("--diagnose", action="store_true", help="输出运行诊断信息")
     parser.add_argument("--reset-config", action="store_true", help="重置用户配置")
