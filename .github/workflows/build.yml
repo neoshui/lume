@@ -139,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir release-files
-          tar -C artifacts/lume-linux -czf release-files/Lume-linux-x86_64.tar.gz Lume-linux-x86_64
+          tar -C artifacts/lume-linux -czf release-files/Lume-linux-x86_64.tar.gz .
           find artifacts/lume-windows -type f -size +0c -exec cp {} release-files/ \;
           prerelease_flag=""
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease_flag="--prerelease"; fi
