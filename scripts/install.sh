@@ -18,7 +18,7 @@ for arg in "$@"; do
 done
 
 PROJECT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-BINARY="$PROJECT_DIR/release/Lume-linux-x86_64"
+APP_DIR="$PROJECT_DIR/release/Lume-linux-x86_64"
 ICON="lume-256.png"
 LAUNCHER="$HOME/.local/bin/lume-launcher"
 INSTALL_DIR="$HOME/.local/lib/lume"
@@ -33,8 +33,10 @@ echo "===== Lume 安装 ====="
 
 # 1) 复制可执行文件
 mkdir -p "$HOME/.local/bin" "$INSTALL_DIR"
-if [ -f "$BINARY" ]; then
-    cp "$BINARY" "$INSTALL_DIR/Lume"
+if [ -x "$APP_DIR/Lume" ]; then
+    rm -rf "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
+    cp -a "$APP_DIR/." "$INSTALL_DIR/"
     chmod +x "$INSTALL_DIR/Lume"
     cat > "$LAUNCHER" <<EOF
 #!/bin/sh
@@ -43,7 +45,7 @@ EOF
     chmod +x "$LAUNCHER"
     echo "[1/4] 可执行文件 -> $INSTALL_DIR/Lume"
 else
-    echo "错误: 未找到 $BINARY，请先运行 bash $PROJECT_DIR/build_linux.sh"
+    echo "错误: 未找到目录版程序 $APP_DIR，请先运行 bash $PROJECT_DIR/build_linux.sh"
     exit 1
 fi
 
@@ -56,13 +58,15 @@ echo "[2/4] 图标 -> $ICON_TARGET"
 mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_TARGET" <<EOF
 [Desktop Entry]
-Name=Lume Launcher
+Name=Lume
 Comment=Floating launcher — search apps, clipboard, commands
 Exec=$LAUNCHER
 Icon=$ICON_DIR/com.lume.launcher.png
 Type=Application
 Categories=Utility;
+StartupWMClass=Lume
 Terminal=false
+StartupNotify=false
 EOF
 echo "[3/4] .desktop -> $DESKTOP_TARGET"
 
@@ -78,6 +82,7 @@ X-GNOME-Autostart-enabled=true
 NoDisplay=true
 Hidden=false
 Terminal=false
+StartupNotify=false
 EOF
     echo "      登录启动 -> $AUTOSTART_TARGET"
 elif [ "$AUTOSTART_MODE" = "disable" ]; then

@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QSize
+from PySide6.QtCore import Qt, QTimer, QEvent, QPoint, QRect, QSize
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QIcon, QKeyEvent, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QSizePolicy, QSystemTrayIcon, QVBoxLayout, QWidget, QToolTip,
 )
 
+from lume.qt import smartisan
 from lume.config import get_data_dir, load_config, save_config
 from lume.autostart import set_autostart
 from lume.desktop import detect_desktop
@@ -26,7 +27,7 @@ from lume.log_utils import get_logger
 from lume.qt.utils import (
     _mix, _qcolor, _rgb_text, _icon, _fallback_icon, register_gnome_shortcut,
 )
-from lume.qt.widgets import ResultRow, ClipboardChip
+from lume.qt.widgets import ResultRow, ClipboardChip, ClipboardFlowLayout, PrivacyButton
 from lume.qt.clipboard import ClipboardStore
 from lume.qt.shell_extension import install_and_enable, is_enabled
 from lume.qt.settings import TabbedSettingsDialog
@@ -48,25 +49,39 @@ class LumeWindow(QMainWindow):
         super().__init__()
         self.app = app
         self.background = background
+        self._dismissed = False
         self.config = load_config()
         self.results: list[SearchResult] = []
-        self.preview = QLabel()
-        self.preview.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-        self.preview.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.preview.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.preview.setStyleSheet("QLabel { background: #ffffff; border: 1px solid #cfd7e5; border-radius: 8px; padding: 6px; }")
+        self.preview = QFrame(self)
+        preview_layout = QVBoxLayout(self.preview)
+        preview_layout.setContentsMargins(8, 8, 8, 8)
+        preview_layout.setSpacing(6)
+        self.preview_image = QLabel()
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(self.preview_image)
+        preview_caption = QLabel("左键复制图片 · 双击固定 · 右键菜单")
+        preview_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(preview_caption)
+        self.preview.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.preview.setObjectName("imagePreview")
+        self.preview.setStyleSheet("QFrame#imagePreview { background: #ffffff; border: 1px solid #d6dfda; border-radius: 8px; } QLabel { background: transparent; border: 0; padding: 0; color: #52665a; font-size: 11px; }")
+        self.preview.hide()
         self._settings_open = False
         self.setWindowTitle("Lume")
         icon_path = _PROJECT_ROOT / "lume-256.png"
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
         self._setup_tray_and_hotkey(icon_path)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        # Lume is a transient launcher. Keep it out of the dock/task switcher
+        # while hidden; unlike a normal app window it should not persist there.
+        window_type = Qt.WindowType.Tool
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | window_type)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         root = QFrame()
         root.setObjectName("panel")
         shadow = QGraphicsDropShadowEffect(root)
+        self._panel_shadow = shadow
         shadow.setBlurRadius(40); shadow.setOffset(0, 14); shadow.setColor(QColor(22, 32, 48, 58))
         root.setGraphicsEffect(shadow)
         root_layout = QVBoxLayout(root)
@@ -88,7 +103,9 @@ class LumeWindow(QMainWindow):
         self.search_entry.returnPressed.connect(self._activate_after_pending_refresh)
         self.search_entry.installEventFilter(self)
         search_row.addWidget(self.search_entry)
+        self._search_icon_action = self.search_entry.addAction(smartisan.icon("search"), QLineEdit.ActionPosition.LeadingPosition)
         settings = QPushButton("⚙")
+        self.settings_button = settings
         settings.setObjectName("settings")
         settings.setFixedSize(42, 42)
         settings.clicked.connect(self.open_settings)
@@ -110,10 +127,15 @@ class LumeWindow(QMainWindow):
         self.splitter.addWidget(self.result_list)
 
         clip = QWidget()
+        clip.setObjectName("clipboardArea")
         clip_layout = QVBoxLayout(clip)
-        clip_layout.setContentsMargins(0, 0, 0, 0)
+        clip_layout.setContentsMargins(10, 8, 10, 10)
         clip_layout.setSpacing(8)
-        clip_header = QHBoxLayout()
+        clip_header_bar = QFrame()
+        clip_header_bar.setObjectName("clipboardHeaderBar")
+        clip_header = QHBoxLayout(clip_header_bar)
+        clip_header.setContentsMargins(10, 6, 8, 6)
+        clip_header.setSpacing(8)
         clip_title = QLabel("剪贴板")
         clip_title.setObjectName("clipboardTitle")
         clip_header.addWidget(clip_title)
@@ -122,14 +144,20 @@ class LumeWindow(QMainWindow):
         clear.setObjectName("clearClipboard")
         clear.clicked.connect(self.clear_clipboard)
         clip_header.addWidget(clear)
-        clip_layout.addLayout(clip_header)
+        clip_layout.addWidget(clip_header_bar)
         self.clip_scroll = QScrollArea()
         self.clip_scroll.setWidgetResizable(True)
+        self.clip_scroll.verticalScrollBar().valueChanged.connect(lambda _: self.hide_image_preview())
         self.clip_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.clip_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.clip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._clipboard_reflow_timer = QTimer(self)
+        self._clipboard_reflow_timer.setSingleShot(True)
+        self._clipboard_reflow_timer.timeout.connect(self._reflow_clipboard)
+        self.clip_scroll.viewport().installEventFilter(self)
         self.clip_content = QWidget()
-        self.clip_flow = QVBoxLayout(self.clip_content)
+        self.clip_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.clip_flow = ClipboardFlowLayout(self.clip_content)
         self.clip_flow.setContentsMargins(0, 4, 0, 4)
         self.clip_flow.setSpacing(6)
         self.clip_scroll.setWidget(self.clip_content)
@@ -138,30 +166,15 @@ class LumeWindow(QMainWindow):
         private_card.setObjectName("privateModeCard")
         private_card.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         private_layout = QHBoxLayout(private_card)
-        private_layout.setContentsMargins(9, 7, 10, 7)
-        private_layout.setSpacing(8)
-        self.private_mode = QCheckBox()
+        private_layout.setContentsMargins(0, 0, 8, 0)
+        private_layout.setSpacing(6)
+        self.private_mode = PrivacyButton(private_card)
         self.private_mode.setObjectName("privateModeToggle")
         self.private_mode.setToolTip("开启后，新的文本和图片不会保存到剪切板历史")
         self.private_mode.setChecked(bool(self.config.get("clipboard_private_mode", False)))
         self.private_mode.toggled.connect(self.set_private_mode)
         private_layout.addWidget(self.private_mode)
-        private_icon = QLabel("🔒")
-        private_icon.setObjectName("privateModeIcon")
-        private_layout.addWidget(private_icon)
-        private_text_layout = QVBoxLayout()
-        private_text_layout.setContentsMargins(0, 0, 0, 0)
-        private_text_layout.setSpacing(1)
-        private_title = QLabel("私密模式")
-        private_title.setObjectName("privateModeTitle")
-        private_description = QLabel("开启后，新的复制内容不会保存")
-        private_description.setObjectName("privateModeDescription")
-        private_text_layout.addWidget(private_title)
-        private_text_layout.addWidget(private_description)
-        private_layout.addLayout(private_text_layout)
-        # Keep this compact and left-aligned instead of stretching across the
-        # entire clipboard panel.
-        clip_layout.addWidget(private_card, 0, Qt.AlignmentFlag.AlignLeft)
+        clip_header.insertWidget(2, private_card)
         self.splitter.addWidget(clip)
         root_layout.addWidget(self.splitter)
         self.status_label = QLabel()
@@ -204,26 +217,37 @@ class LumeWindow(QMainWindow):
         dark = self.config.get("theme") == "dark"
         if self.config.get("theme") == "auto":
             dark = self.app.styleHints().colorScheme() == Qt.ColorScheme.Dark
+        active = smartisan.is_smartisan(self.config)
+        self.private_mode.set_visual_style(active, dark)
+        self._search_icon_action.setVisible(active)
+        self.settings_button.setText("" if active else "⚙")
+        self.settings_button.setIcon(smartisan.icon("setting") if active else QIcon())
+        self.settings_button.setIconSize(QSize(20, 20))
+        self.settings_button.setToolTip("设置")
+        self.settings_button.setAccessibleName("设置")
+        self._panel_shadow.setBlurRadius(18 if active else 40)
+        self._panel_shadow.setOffset(0, 4 if active else 14)
+        self._panel_shadow.setColor(QColor(0, 0, 0, 22) if active else QColor(22, 32, 48, 58))
+        if active:
+            p = smartisan.palette(dark)
+            self.setStyleSheet(smartisan.launcher_stylesheet(dark, self.config.get("font_size", 15)))
+            self.preview.setStyleSheet(f"QFrame#imagePreview {{ background: {p['surface']}; border: 1px solid {p['border']}; border-radius: 8px; }} QLabel {{ background: transparent; border: 0; padding: 0; color: {p['muted']}; font-size: 11px; }}")
+            return
+        self.preview.setStyleSheet("QFrame#imagePreview { background: #ffffff; border: 1px solid #d6dfda; border-radius: 8px; } QLabel { background: transparent; border: 0; padding: 0; color: #52665a; font-size: 11px; }")
         appearance = self.config.get("appearance", {})
         accent = appearance.get("accent_color", "#6988b5")
         accent_soft = _mix(accent, "#ffffff", 0.84) if not dark else _mix(accent, "#111827", 0.52)
-        # Keep result selection visibly distinct even with low-contrast/custom accents.
-        # The general accent_soft is intentionally subtle for tabs and buttons, while
-        # a result row needs a stronger surface so keyboard navigation remains obvious.
-        # Use a clearly visible accent surface for the keyboard cursor.  A very
-        # pale blend looks elegant in settings but makes the active result
-        # disappear against the panel, especially with beige/grey accents.
-        result_selected = _mix(accent, "#ffffff", 0.12) if not dark else _mix(accent, "#111827", 0.16)
-        result_selected_border = accent
+        result_selected = _mix(accent, "#ffffff", 0.91) if not dark else _mix(accent, "#202329", 0.78)
+        result_selected_border = _mix(accent, "#ffffff", 0.40) if not dark else _mix(accent, "#202329", 0.35)
         selected_bg = _qcolor(result_selected)
         luminance = (selected_bg.red() * 299 + selected_bg.green() * 587 + selected_bg.blue() * 114) / 1000
         selected_text = "#172033" if luminance > 165 else "#ffffff"
         selected_desc = "rgba(23,32,51,0.72)" if luminance > 165 else "rgba(255,255,255,0.78)"
         accent_hover = _mix(accent, "#ffffff", 0.74) if not dark else _mix(accent, "#111827", 0.42)
-        opacity = float(appearance.get("panel_opacity", 0.97))
-        radius = int(appearance.get("border_radius", 18))
+        opacity = 1.0
+        radius = 12
         panel_rgb = _rgb_text(appearance.get("panel_bg_dark_rgb" if dark else "panel_bg_rgb", "32,35,42" if dark else "247,249,252"), "32,35,42" if dark else "247,249,252")
-        panel = f"rgba({panel_rgb},{opacity})"
+        panel = "#25272b" if dark else "#fcfcfb"
         text = appearance.get("text_dark_color" if dark else "text_color", "#f2f4f8" if dark else "#18202d")
         desc = appearance.get("desc_dark_color" if dark else "desc_color", "rgba(218,226,240,0.56)" if dark else "rgba(62,73,94,0.72)")
         result_name = "#e5ebf4" if dark else "#2d3b52"
@@ -257,9 +281,9 @@ class LumeWindow(QMainWindow):
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; width: 0; }}
             QListWidget#resultList::item {{ padding: 0; border: 0; margin: 2px 0; background: transparent; color: {result_name}; }}
             QListWidget#resultList::item:selected {{
-                background: {result_selected};
+                background: transparent;
                 color: {selected_text};
-                border: 1px solid {result_selected_border};
+                border: 0;
                 border-radius: 9px;
             }}
             QListWidget#resultList[winNative="true"]::item {{ font-size: {windows_native_result_font}px; }}
@@ -274,25 +298,24 @@ class LumeWindow(QMainWindow):
                 border: 0;
             }}
 
-            QWidget#resultRow:hover {{ background: {hover_row}; }}
-            QWidget#resultRow[selected="true"] {{ background: {result_selected}; border: 1px solid {result_selected_border}; }}
+            QWidget#resultRow:hover {{ background: transparent; }}
+            QWidget#resultRow[selected="true"] {{ background: transparent; border: 0; }}
             QLabel#resultIcon {{ border-radius: 8px; background: rgba(255,255,255,0.38); }}
-            QLabel#resultName {{ color: {result_name}; font-size: 14px; font-weight: 600; }}
+            QLabel#resultName {{ color: {result_name}; font-size: 14px; font-weight: 500; }}
             QLabel#resultDescription {{ color: {result_desc}; font-size: 12px; }}
             QWidget#resultRow[selected="true"] QLabel#resultName {{ color: {selected_text}; }}
             QWidget#resultRow[selected="true"] QLabel#resultDescription {{ color: {selected_desc}; }}
-            QLabel#clipboardTitle {{ color: {text}; font-size: 13px; font-weight: 800; }}
+            QWidget#clipboardArea {{ background: {"#303338" if dark else "#f0f2f1"}; border: 0; border-radius: 10px; }}
+            QWidget#clipboardArea QScrollArea, QWidget#clipboardArea QScrollArea > QWidget > QWidget {{ background: transparent; }}
+            QFrame#clipboardHeaderBar {{ background: {"#303338" if dark else "#f0f3f2"}; border: 0; border-top: 0; border-radius: 0; }}
+            QLabel#clipboardTitle {{ color: {text}; font-size: 13px; font-weight: 600; }}
             QLabel#statusLabel {{ color: {desc}; font-size: 11px; padding-top: 2px; }}
-            QFrame#privateModeCard {{ background: {accent_soft}; border: 1px solid {_mix(accent, '#ffffff' if not dark else '#111827', 0.48)}; border-radius: 11px; }}
+            QFrame#privateModeCard {{ background: transparent; border: 0; border-radius: 0; }}
             QLabel#privateModeIcon {{ font-size: 15px; background: transparent; }}
             QLabel#privateModeTitle {{ color: {text}; font-size: 12px; font-weight: 700; background: transparent; }}
             QLabel#privateModeDescription {{ color: {desc}; font-size: 11px; background: transparent; }}
-            QCheckBox#privateModeToggle {{ background: transparent; spacing: 0; }}
-            QCheckBox#privateModeToggle::indicator {{ width: 34px; height: 20px; border-radius: 10px; border: 1px solid {border}; background: {chip_bg}; }}
-            QCheckBox#privateModeToggle::indicator:hover {{ border-color: {accent}; }}
-            QCheckBox#privateModeToggle::indicator:checked {{ background: {accent}; border-color: {accent}; }}
-            QPushButton#clipboardChip {{ background: {chip_bg}; color: {"#dbe5f3" if dark else "#516071"}; border: 1px solid {border};
-                border-radius: 13px; padding: 3px 10px; font-size: 12px; min-height: 22px; }}
+            QPushButton#clipboardChip {{ background: {chip_bg}; color: {"#dbe5f3" if dark else "#516071"}; border: 1px solid {"#3c4047" if dark else "#e5e8e6"};
+                border-radius: 7px; padding: 3px 9px; font-size: 12px; min-height: 22px; }}
             QPushButton#clipboardChip:hover {{ background: {accent_soft}; color: {selected_text}; border-color: {accent}; }}
             QPushButton#clipboardImage {{ background: {chip_bg}; border: 1px solid {border}; border-radius: 8px; padding: 3px; }}
             QPushButton#clipboardImage:hover {{ background: {accent_soft}; border-color: {accent}; }}
@@ -301,7 +324,7 @@ class LumeWindow(QMainWindow):
             QPushButton:hover {{ border-color: {accent}; background: {accent_soft}; }}
             QPushButton#settings {{ font-size: 16px; color: {accent}; }}
             QPushButton#clearClipboard {{ padding: 5px 12px; color: {"#dbe5f3" if dark else "#516071"}; }}
-            QSplitter::handle {{ background: {border}; height: 1px; }}
+            QSplitter::handle {{ background: transparent; height: 10px; }}
             QLineEdit#searchEntry:focus {{ border: 1px solid {accent}; }}
             QToolTip {{
                 background: {tooltip_bg}; color: {tooltip_text};
@@ -312,6 +335,13 @@ class LumeWindow(QMainWindow):
         """)
 
     def show_launcher(self):
+        if self._dismissed:
+            self.hide()
+        self._dismissed = False
+        self._wake_screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen()
+        self.winId()
+        if self._wake_screen is not None and self.windowHandle() is not None:
+            self.windowHandle().setScreen(self._wake_screen)
         self.search_entry.clear()
 
         # Restore from invisible state
@@ -320,6 +350,7 @@ class LumeWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.search_entry.setFocus()
+        self._clipboard_reflow_timer.start(0)
 
         # Schedule fine-tune after compositor has mapped the surface
         QTimer.singleShot(1, self._fine_tune_position)
@@ -331,7 +362,7 @@ class LumeWindow(QMainWindow):
 
     def _fine_tune_position(self):
         # Capture the cursor screen now that surfaces and outputs exist.
-        screen = QGuiApplication.screenAt(QCursor.pos()) or self.screen() or QGuiApplication.primaryScreen()
+        screen = getattr(self, "_wake_screen", None) or QGuiApplication.screenAt(QCursor.pos()) or self.screen() or QGuiApplication.primaryScreen()
         if screen is None:
             return  # Wayland compositor still has no outputs
         area = screen.availableGeometry()
@@ -355,19 +386,21 @@ class LumeWindow(QMainWindow):
     def toggle(self):
         if getattr(self, '_settings_open', False):
             return  # Don't toggle while settings dialog is open
-        if self.isVisible():
+        if self.isVisible() and not self._dismissed and self.windowOpacity() > 0:
             self._dismiss()
         else:
             self.show_launcher()
 
     def _dismiss(self):
-        # On Wayland, hide() destroys the wl_surface.  The compositor
-        # won't send clipboard dataChanged events, and mimeData() will
-        # return empty.  Keep the window always-visible but invisible
-        # (opacity 0) so the surface stays alive.
+        self.hide_image_preview()
         self._saved_pos = self.pos()
-        self.setWindowOpacity(0.0)
-        self.lower()
+        self.hide()
+        self.setWindowOpacity(1.0)
+        self._dismissed = True
+        sizes = self.splitter.sizes()
+        if sizes:
+            self.config["paned_position"] = sizes[0]
+            save_config(self.config)
         QTimer.singleShot(50, self.store.capture)
 
     # === System tray + Windows global hotkey ===
@@ -443,7 +476,14 @@ class LumeWindow(QMainWindow):
 
     def refresh_results(self, *_):
         QToolTip.hideText()
-        self.results = search(self.search_entry.text(), self.config)
+        query = self.search_entry.text()
+        show_results = bool(query.strip()) or self.config.get("show_apps_on_open", True)
+        was_visible = not self.result_list.isHidden()
+        self.result_list.setVisible(show_results)
+        if show_results and not was_visible:
+            height = self.config.get("launcher_height", 720)
+            self.splitter.setSizes([self.config.get("paned_position", 0) or max(200, height - 250), 220])
+        self.results = search(query, self.config) if show_results else []
         self.result_list.clear()
         self.result_list.setToolTip("")
         use_native_rows = sys.platform == "win32"
@@ -457,8 +497,8 @@ class LumeWindow(QMainWindow):
             self.result_list.setMovement(QListWidget.Movement.Static)
             self.result_list.setResizeMode(QListWidget.ResizeMode.Adjust)
             self.result_list.setWrapping(True)
-            columns = max(1, (viewport_width - 24) // 190)
-            cell_width = max(190, (viewport_width - 24) // columns)
+            columns = max(1, (viewport_width - 24) // 150)
+            cell_width = max(150, (viewport_width - 24) // columns)
             self.result_list.setItemAlignment(Qt.AlignmentFlag.AlignLeft)
             self.result_list.setGridSize(QSize(cell_width, 132 if use_native_rows else 90))
             self.result_list.setSpacing(0)
@@ -472,6 +512,11 @@ class LumeWindow(QMainWindow):
         density = self.config.get("result_density", "comfortable")
         row_height = {"compact": 62, "comfortable": 72, "airy": 82}.get(density, 72)
         show_description = self.config.get("show_result_descriptions", True)
+        dark = smartisan.is_dark(self.config)
+        selection_color = smartisan.palette(dark)["selection"] if smartisan.is_smartisan(self.config) else _mix(
+            self.config.get("appearance", {}).get("accent_color", "#6988b5"),
+            "#202329" if dark else "#ffffff", 0.86,
+        )
         prev_category = None
         for result in self.results:
             # Insert category header when category changes (list mode only)
@@ -508,7 +553,7 @@ class LumeWindow(QMainWindow):
                 row = ResultRow(result, show_description, grid=grid)
                 if grid:
                     row.set_grid_width(cell_width - 6)
-                row.set_selection_color(self.config.get("appearance", {}).get("accent_color", "#6988b5"))
+                row.set_selection_color(selection_color)
                 row.setToolTip("")
                 for child in row.findChildren(QWidget):
                     child.setToolTip("")
@@ -519,14 +564,15 @@ class LumeWindow(QMainWindow):
                 item.setToolTip("")
         if self.result_list.count():
             self.result_list.setCurrentRow(0)
+            self.result_list.scrollToTop()
         self.update_result_selection()
 
     def _update_grid_geometry(self):
         if self.config.get("layout", "list") != "grid":
             return
         viewport_width = max(1, self.result_list.viewport().width())
-        columns = max(1, (viewport_width - 24) // 190)
-        cell_width = max(190, (viewport_width - 24) // columns)
+        columns = max(1, (viewport_width - 24) // 150)
+        cell_width = max(150, (viewport_width - 24) // columns)
         self.result_list.setGridSize(QSize(cell_width, 90))
         for index in range(self.result_list.count()):
             row = self.result_list.itemWidget(self.result_list.item(index))
@@ -549,7 +595,11 @@ class LumeWindow(QMainWindow):
     def _hover_result(self, item):
         """Make the visual selection follow the pointer as it crosses results."""
         if item is not None and item is not self.result_list.currentItem():
+            scroll = self.result_list.verticalScrollBar()
+            position = scroll.value()
             self.result_list.setCurrentItem(item)
+            # Hover selection must not auto-scroll a partly visible row into view.
+            scroll.setValue(position)
 
     def activate_current(self):
         if self.result_list.currentItem():
@@ -571,20 +621,15 @@ class LumeWindow(QMainWindow):
             notes = get_data_dir() / "notes"
             notes.mkdir(parents=True, exist_ok=True)
             (notes / f"{datetime.now():%Y-%m-%d-%H-%M-%S}.md").write_text(result.action_data, encoding="utf-8")
-        self.hide()
+        self._dismiss()
 
     def refresh_clipboard(self):
+        self.hide_image_preview()
         while self.clip_flow.count():
             item = self.clip_flow.takeAt(0)
-            if item.layout():
-                row = item.layout()
-                while row.count():
-                    child = row.takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
+            if item.widget():
+                item.widget().deleteLater()
         entries = [(0, e) for e in self.store.get_history()]
-        row = None
-        row_count = 0
         for _, entry in entries:
             image = entry.get("content_type") == "image"
             if not image and not entry.get("text", "").strip():
@@ -602,7 +647,7 @@ class LumeWindow(QMainWindow):
                 else:
                     chip.setFixedWidth(52)
                 chip.setFixedHeight(50)
-                chip.setToolTip("左键复制图片 · 双击固定 · 右键菜单")
+                chip.setToolTip("")
                 chip.setProperty("image_entry", True)
             else:
                 text = entry.get("text", "").replace("\n", " ").strip()
@@ -614,53 +659,59 @@ class LumeWindow(QMainWindow):
             chip.singleClicked.connect(lambda e=entry: self.copy_chip(e))
             chip.doubleClicked.connect(lambda e=entry: self.toggle_pin(e))
             chip.contextRequested.connect(lambda pos, e=entry: self.clipboard_menu(e, pos))
+            chip.hoverEnded.connect(self.hide_image_preview)
             if image:
-                chip.hoverStarted.connect(lambda pos, e=entry: self.show_image_preview(e, pos))
-                chip.hoverEnded.connect(self.hide_image_preview)
-            if row is None or row_count >= 6:
-                row = QHBoxLayout()
-                row.setSpacing(6)
-                row.setAlignment(Qt.AlignmentFlag.AlignLeft)
-                self.clip_flow.addLayout(row)
-                row_count = 0
-            row.addWidget(chip)
-            row_count += 1
-        if row is not None:
-            row.addStretch(1)
-        self.clip_content.adjustSize()
+                chip.hoverStarted.connect(lambda pos, e=entry, c=chip: self.show_image_preview(e, pos, c))
+            chip.ensurePolished()
+            self.clip_flow.addWidget(chip)
+        self.clip_flow.invalidate()
+        self.clip_content.updateGeometry()
+        self._clipboard_reflow_timer.start(0)
         desktop = detect_desktop()
         provider = "GNOME 扩展" if desktop.needs_gnome_extension and is_enabled() else "Qt 剪贴板"
         self.status_label.setText(
             f"剪贴板 {len(self.store.entries)}/{self.store.max_entries} · {provider} · {self.config.get('shortcut', 'ALT+Space')} · Lume {VERSION}"
         )
 
-    def show_image_preview(self, entry, pos):
-        # 如果搜索框正在输入（有焦点），不显示预览，避免打字时弹窗闪烁
-        if self.search_entry.hasFocus():
+    def _reflow_clipboard(self):
+        """Use the settled viewport width rather than the content size hint."""
+        viewport = self.clip_scroll.viewport()
+        width = viewport.width()
+        if width <= 0:
             return
+        scroll = self.clip_scroll.verticalScrollBar()
+        position = scroll.value()
+        height = max(viewport.height(), self.clip_flow.heightForWidth(width))
+        self.clip_content.resize(width, height)
+        self.clip_flow.invalidate()
+        self.clip_flow.setGeometry(self.clip_content.rect())
+        scroll.setValue(position)
+
+    def show_image_preview(self, entry, pos, anchor=None):
         pixmap = QPixmap(entry.get("image_path", ""))
         if pixmap.isNull():
             return
-        # Preview uses a proportional scale, so every source image keeps the same
-        # visual relationship to its original dimensions.
-        preview_scale = 0.8
-        preview = pixmap.scaled(
-            max(1, round(pixmap.width() * preview_scale)),
-            max(1, round(pixmap.height() * preview_scale)),
-            Qt.AspectRatioMode.IgnoreAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.preview.setPixmap(preview)
-        self.preview.adjustSize()
-        self.preview.move(pos.x() - self.preview.width() // 2, pos.y() - self.preview.height() - 14)
+        clipboard_area = self.clip_scroll.parentWidget()
+        top = clipboard_area.mapTo(self, QPoint()).y()
+        available_width = max(1, self.width() - 44)
+        available_height = max(1, top - 22 - 6)
+        scale = min(0.8, max(1, available_width - 16) / pixmap.width(), max(1, available_height - 42) / pixmap.height())
+        image = pixmap.scaled(max(1, round(pixmap.width() * scale)), max(1, round(pixmap.height() * scale)), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.preview_image.setPixmap(image)
+        self.preview.layout().invalidate()
+        self.preview.setFixedSize(self.preview.layout().sizeHint())
+        center = anchor.mapTo(self, anchor.rect().center()).x() if anchor else self.width() // 2
+        x = max(22, min(center - self.preview.width() // 2, self.width() - 22 - self.preview.width()))
+        self.preview.move(x, top - self.preview.height() - 6)
         self.preview.show()
+        self.preview.raise_()
 
     def hide_image_preview(self):
         self.preview.hide()
 
     def copy_chip(self, entry):
         self.store.copy(entry)
-        self.hide()
+        self._dismiss()
 
     def toggle_pin(self, entry):
         entry["pinned"] = not entry.get("pinned", False)
@@ -747,9 +798,13 @@ class LumeWindow(QMainWindow):
         self.store.config = self.config
         save_config(self.config)
         log.info("Clipboard private mode %s", "enabled" if enabled else "disabled")
-        self.refresh_clipboard()
 
     def eventFilter(self, watched, event):
+        scroll = getattr(self, "clip_scroll", None)
+        if scroll is not None and watched is scroll.viewport() and event.type() == QEvent.Type.Resize:
+            timer = getattr(self, "_clipboard_reflow_timer", None)
+            if timer is not None:
+                timer.start(0)
         result_list = getattr(self, "result_list", None)
         result_viewport = result_list.viewport() if result_list is not None else None
         if watched is result_viewport and event.type() == QEvent.Type.ToolTip:
@@ -769,7 +824,7 @@ class LumeWindow(QMainWindow):
                 if count:
                     current = max(0, self.result_list.currentRow())
                     grid = self.config.get("layout", "list") == "grid"
-                    columns = max(1, self.result_list.viewport().width() // 190) if grid else 1
+                    columns = max(1, self.result_list.viewport().width() // max(1, self.result_list.gridSize().width())) if grid else 1
                     if grid and key == Qt.Key.Key_Left:
                         target = max(0, current - 1)
                     elif grid and key == Qt.Key.Key_Right:
@@ -800,9 +855,14 @@ class LumeWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.hide()
+            self._dismiss()
         else:
             super().keyPressEvent(event)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._dismissed = False
+        super().changeEvent(event)
 
     def closeEvent(self, event):
         self._unregister_win32_hotkey()
@@ -817,13 +877,20 @@ class LumeWindow(QMainWindow):
         super().hideEvent(event)
 
 
+def configure_application(app):
+    """Match Qt's Wayland app ID and desktop window icon to the launcher."""
+    app.setApplicationName("Lume")
+    app.setApplicationDisplayName("Lume")
+    app.setDesktopFileName("com.lume.launcher")
+    app.setWindowIcon(QIcon(str(_PROJECT_ROOT / "lume-256.png")))
+    app.setQuitOnLastWindowClosed(False)
+
+
 def run(argv=None) -> int:
     argv = argv or sys.argv
     background = "--background" in argv
     app = QApplication(argv)
-    app.setApplicationName("Lume")
-    app.setApplicationDisplayName("Lume")
-    app.setQuitOnLastWindowClosed(False)
+    configure_application(app)
 
     socket = QLocalSocket()
     socket.connectToServer(APP_SERVER_NAME)

@@ -140,6 +140,7 @@ class ClipboardStore(QObject):
             return False
         if not isinstance(source_entries, list):
             return False
+        pinned_by_id = {str(e.get("id", "")): bool(e.get("pinned")) for e in self.entries if e.get("id")}
         imported: list[dict] = []
         accepted_source: list[dict] = []
         private_mode = bool(self.config.get("clipboard_private_mode", False))
@@ -158,7 +159,7 @@ class ClipboardStore(QObject):
                 accepted_source.append(item)
                 imported.append({
                     "id": str(item.get("id", "")), "text": text, "content_type": "text",
-                    "pinned": bool(item.get("pinned")), "source": "lume-shell",
+                    "pinned": pinned_by_id.get(str(item.get("id", "")), bool(item.get("pinned"))), "source": "lume-shell",
                     "captured_at": item.get("captured_at", ""),
                 })
             elif content_type == "image":
@@ -171,7 +172,7 @@ class ClipboardStore(QObject):
                 imported.append({
                     "id": str(item.get("id", "")), "text": "", "content_type": "image",
                     "image_path": str(image_path), "image_hash": str(item.get("image_hash", "")),
-                    "pinned": bool(item.get("pinned")), "source": "lume-shell",
+                    "pinned": pinned_by_id.get(str(item.get("id", "")), bool(item.get("pinned"))), "source": "lume-shell",
                     "captured_at": item.get("captured_at", ""),
                 })
         if accepted_source != source_entries:

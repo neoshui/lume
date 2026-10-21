@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import os
+from functools import lru_cache
 import subprocess
 import sys
 from pathlib import Path
@@ -50,21 +52,61 @@ def _mix(color: str, other: str, amount: float) -> str:
     return QColor(r, g, b).name()
 
 
+def _linux_icon_roots() -> tuple[Path, ...]:
+    """Include app-installed and Flatpak icons even when Qt's theme cache misses."""
+    data_home = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+    data_dirs = [Path(p) for p in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(os.pathsep) if p]
+    data_dirs += [Path.home() / ".local/share/flatpak/exports/share", Path("/var/lib/flatpak/exports/share")]
+    roots = [Path(p) for p in QIcon.themeSearchPaths() if p and not p.startswith(":")]
+    roots += [data_home / "icons", Path.home() / ".icons"]
+    roots += [base / "icons" for base in data_dirs]
+    roots += [data_home / "pixmaps"] + [base / "pixmaps" for base in data_dirs]
+    return tuple(dict.fromkeys(roots))
+
+
+@lru_cache(maxsize=512)
+def _installed_icon_path(name: str, roots: tuple[Path, ...]) -> str:
+    if not name or "/" in name or "\\" in name:
+        return ""
+    names = [name] if Path(name).suffix.lower() in (".png", ".svg", ".xpm") else [name + ext for ext in (".png", ".svg", ".xpm")]
+    for root in roots:
+        for size in ("128x128", "64x64", "256x256", "48x48", "512x512", "32x32", "scalable", "24x24", "16x16", "symbolic"):
+            for filename in names:
+                candidate = root / "hicolor" / size / "apps" / filename
+                if candidate.is_file():
+                    return str(candidate)
+        for filename in names:
+            candidate = root / filename
+            if candidate.is_file():
+                return str(candidate)
+    return ""
+
+
 def _icon(value: str) -> QIcon:
-    """Resolve an icon by path or theme name, falling back to generic executable."""
-    if value:
-        clean_value = str(value).split(",", 1)[0].strip().strip('"')
-        path = Path(clean_value)
-        if path.exists():
+    """Resolve direct paths, theme names and unindexed application icons."""
+    clean_value = str(value or "").split(",", 1)[0].strip().strip('"')
+    if clean_value:
+        path = Path(clean_value).expanduser()
+        if path.is_file():
             if sys.platform == "win32":
                 icon = _FILE_ICON_PROVIDER.icon(QFileInfo(str(path)))
                 if not icon.isNull():
                     return icon
             icon = QIcon(str(path))
-            if not icon.isNull():
+            if not icon.pixmap(32, 32).isNull():
                 return icon
-    icon = QIcon.fromTheme(value or "application-x-executable")
-    return icon if not icon.isNull() else QIcon.fromTheme("application-x-executable")
+        names = clean_value.split()[2:] if clean_value.startswith(". GThemedIcon ") else [clean_value]
+        for name in names:
+            icon = QIcon.fromTheme(name)
+            if not icon.isNull() and not icon.pixmap(32, 32).isNull():
+                return icon
+            if sys.platform == "linux":
+                filename = _installed_icon_path(name, _linux_icon_roots())
+                if filename:
+                    icon = QIcon(filename)
+                    if not icon.pixmap(32, 32).isNull():
+                        return icon
+    return QIcon.fromTheme("application-x-executable")
 
 
 def _fallback_icon(result: SearchResult) -> QIcon:

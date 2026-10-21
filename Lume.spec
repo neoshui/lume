@@ -8,6 +8,7 @@ import sys
 project_root = Path(SPECPATH)
 console_mode = os.environ.get("LUME_CONSOLE") == "1"
 datas = [
+    (str(project_root / "lume/resources/smartisan"), "lume/resources/smartisan"),
     (str(project_root / "lume-128.png"), "."),
     (str(project_root / "lume-256.png"), "."),
     (str(project_root / "lume-512.png"), "."),

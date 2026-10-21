@@ -15,6 +15,7 @@ DATA_DIR = Path.home() / ".local" / "share" / "lume"
 
 
 DEFAULT_CONFIG = {
+    "ui_style": "smartisan",
     # Global shortcut key combo
     # Format: UPPERCASE_MODIFIER+key (e.g., "CTRL+space", "ALT+space", "CTRL+ALT+t")
     # Valid modifiers: CTRL, ALT, SHIFT, LOGO (Super), NUM (mod2)
@@ -32,6 +33,7 @@ DEFAULT_CONFIG = {
     # Result list personalization
     # result_density: "compact" | "comfortable" | "airy"
     "result_density": "comfortable",
+    "show_apps_on_open": True,
     "show_result_descriptions": True,
     "show_result_tooltips": True,
     # Clipboard history

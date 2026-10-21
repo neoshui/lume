@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QColorDialog,
 )
 
+from lume.qt import smartisan
 from lume.qt.utils import _mix
 from lume.themes import list_themes, get_theme
 
@@ -161,8 +162,8 @@ class TabbedSettingsDialog(QDialog):
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
         self.config = config
-        self.setWindowTitle("Lume 设置")
-        self.resize(620, 470)
+        self.setWindowTitle("设置")
+        self.resize(680, 580)
         self.setMinimumSize(520, 400)
         appearance = self.config.get("appearance", {})
         # Settings keeps its stable blue-grey chrome; the user accent is for
@@ -221,12 +222,10 @@ class TabbedSettingsDialog(QDialog):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; height: 0; }}
         """)
+        self._classic_stylesheet = self.styleSheet()
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
         root.setSpacing(8)
-        title = QLabel("Lume 设置"); title.setObjectName("settingsTitle")
-        hint = QLabel("调整启动器外观、快捷键和搜索服务"); hint.setObjectName("settingsHint")
-        root.addWidget(title); root.addWidget(hint)
         self.tabs = QTabWidget(); root.addWidget(self.tabs, 1)
         self._build_appearance()
         self._build_shortcut()
@@ -236,6 +235,9 @@ class TabbedSettingsDialog(QDialog):
         cancel = QPushButton("取消"); cancel.clicked.connect(self.reject)
         save = QPushButton("保存"); save.setObjectName("primary"); save.clicked.connect(self.accept)
         buttons.addWidget(cancel); buttons.addWidget(save); root.addLayout(buttons)
+        self.ui_style.currentIndexChanged.connect(self._apply_ui_style)
+        self.theme.currentTextChanged.connect(self._apply_ui_style)
+        self._apply_ui_style()
 
     def _page(self):
         page = QWidget(); layout = QFormLayout(page); layout.setContentsMargins(22, 22, 22, 22); layout.setVerticalSpacing(10)
@@ -256,27 +258,45 @@ class TabbedSettingsDialog(QDialog):
         self.width = QSlider(Qt.Orientation.Horizontal); self.width.setRange(480, 1400); self.width.setValue(self.config.get("launcher_width", 680))
         self.height = QSlider(Qt.Orientation.Horizontal); self.height.setRange(400, 1200); self.height.setValue(self.config.get("launcher_height", 720))
         self.vertical_offset = QSlider(Qt.Orientation.Horizontal); self.vertical_offset.setRange(-260, 260); self.vertical_offset.setValue(int(self.config.get("launcher_vertical_offset", 140)))
-        self.theme = QComboBox(); self.theme.addItems(["auto", "light", "dark"]); self.theme.setCurrentText(self.config.get("theme", "auto"))
+        self.ui_style = QComboBox()
+        self.ui_style.addItem("Smartisan", "smartisan")
+        self.ui_style.addItem("Lume 经典", "classic")
+        self.ui_style.setCurrentIndex(0 if smartisan.is_smartisan(self.config) else 1)
+        self.ui_style.setToolTip("Smartisan 采用浅灰层次与轻拟物控件；深色是 Lume 的适配版本")
+        self.theme = QComboBox()
+        for title, value in [("跟随系统", "auto"), ("浅色", "light"), ("深色", "dark")]:
+            self.theme.addItem(title, value)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(self.config.get("theme", "auto"))))
         self.palette = QComboBox(); self.palette.addItems(list_themes()); self.palette.setCurrentText(self.config.get("color_theme", "晨雾"))
         self.theme_preview = QFrame(); self.theme_preview.setFixedSize(118, 22)
         self.theme_preview_text = QLabel(); self.theme_preview_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preview_layout = QVBoxLayout(self.theme_preview); preview_layout.setContentsMargins(7, 0, 7, 0); preview_layout.addWidget(self.theme_preview_text)
         self.palette.currentTextChanged.connect(self._update_theme_preview)
-        self.layout_mode = QComboBox(); self.layout_mode.addItems(["list", "grid"]); self.layout_mode.setCurrentText(self.config.get("layout", "list"))
-        self.density = QComboBox(); self.density.addItems(["compact", "comfortable", "airy"]); self.density.setCurrentText(self.config.get("result_density", "comfortable"))
+        self.layout_mode = QComboBox()
+        self.layout_mode.addItem("列表", "list"); self.layout_mode.addItem("图标网格", "grid")
+        self.layout_mode.setCurrentIndex(max(0, self.layout_mode.findData(self.config.get("layout", "list"))))
+        self.density = QComboBox()
+        for title, value in [("紧凑", "compact"), ("舒适", "comfortable"), ("宽松", "airy")]:
+            self.density.addItem(title, value)
+        self.density.setCurrentIndex(max(0, self.density.findData(self.config.get("result_density", "comfortable"))))
         self.font = QSlider(Qt.Orientation.Horizontal); self.font.setRange(11, 24); self.font.setValue(self.config.get("font_size", 15))
         appearance = self.config.get("appearance", {})
         self.opacity = QSlider(Qt.Orientation.Horizontal); self.opacity.setRange(70, 100); self.opacity.setValue(round(float(appearance.get("panel_opacity", 0.97)) * 100))
         self.radius = QSlider(Qt.Orientation.Horizontal); self.radius.setRange(8, 28); self.radius.setValue(int(appearance.get("border_radius", 18)))
         self.accent = appearance.get("accent_color", "rgb(105, 136, 181)")
         self.panel_rgb = QLineEdit(appearance.get("panel_bg_rgb", "247, 249, 252"))
+        self.show_apps_on_open = QCheckBox("打开时显示应用列表")
+        self.show_apps_on_open.setChecked(self.config.get("show_apps_on_open", True))
+        self.show_apps_on_open.setToolTip("关闭后，输入关键词才显示搜索结果")
         self.show_descriptions = QCheckBox("显示搜索结果详情")
         self.show_descriptions.setChecked(self.config.get("show_result_descriptions", True))
         self.show_tooltips = QCheckBox("鼠标悬停显示结果提示")
         self.show_tooltips.setChecked(self.config.get("show_result_tooltips", True))
         self.accent_palette = self._accent_palette()
-        theme_card, theme_form = self._settings_card("主题与显示", "主题模式决定明暗，配色主题提供基础视觉风格")
+        theme_card, theme_form = self._settings_card("主题与显示", "选择界面风格与明暗模式；Smartisan 深色为适配版本")
+        theme_form.addRow("界面风格", self.ui_style)
         theme_form.addRow("主题模式", self.theme); theme_form.addRow("配色主题", self.palette); theme_form.addRow("主题预览", self.theme_preview)
+        theme_form.addRow("启动显示", self.show_apps_on_open)
         theme_form.addRow("结果布局", self.layout_mode); theme_form.addRow("结果密度", self.density); theme_form.addRow("详情显示", self.show_descriptions); theme_form.addRow("悬停提示", self.show_tooltips)
         surface_card, surface_form = self._settings_card("面板与窗口", "调整启动器的尺寸、字体和表面质感")
         surface_form.addRow("窗口宽度", self._slider_control(self.width)); surface_form.addRow("窗口高度", self._slider_control(self.height)); surface_form.addRow("垂直偏移", self._slider_control(self.vertical_offset)); surface_form.addRow("字体大小", self._slider_control(self.font))
@@ -309,7 +329,7 @@ class TabbedSettingsDialog(QDialog):
         shortcut_row.addWidget(self.shortcut_btn)
         shortcut_row.addWidget(reset_shortcut)
         hint = QLabel("点击按钮，然后按下键盘快捷键组合")
-        hint.setStyleSheet("color:#7a8798; font-size:12px;")
+        hint.setStyleSheet("color:#7f7f7f; font-size:12px;")
         form.addRow("全局快捷键", shortcut_row); form.addRow("剪贴板历史数量", self.clipboard_max)
         form.addRow("自动过期（小时，0=关闭）", self.clipboard_expire)
         form.addRow("单条文本上限", self.clipboard_text_limit)
@@ -473,7 +493,7 @@ class TabbedSettingsDialog(QDialog):
         action_row = QHBoxLayout(); action_row.addWidget(remove); action_row.addWidget(edit)
         pin_form.addRow(action_row)
         hint = QLabel("搜索 URL 必须包含 {query}；网址快捷方式会出现在搜索结果中。")
-        hint.setStyleSheet("color:#7a8798; font-size:12px;"); pin_form.addRow(hint)
+        hint.setStyleSheet("color:#7f7f7f; font-size:12px;"); pin_form.addRow(hint)
         root.addWidget(pin_card)
         root.addStretch()
         self._add_tab(page, "搜索 & 网址")
@@ -493,8 +513,14 @@ class TabbedSettingsDialog(QDialog):
         page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(0, 12, 0, 0); layout.setSpacing(10)
         card, card_form = self._settings_card("关于 Lume", "跨平台浮动启动器")
         info = QLabel(f"Lume 是一款跨平台浮动启动器。\n\n版本：{VERSION}\n快捷键：系统全局快捷键呼出\nEsc：关闭启动器\nEnter：执行选中结果\n\n配置：~/.config/lume/config.json\n数据：~/.local/share/lume/")
-        info.setStyleSheet("color:#66758a; line-height:1.6;")
-        card_form.addRow(info); layout.addWidget(card); layout.addStretch()
+        info.setStyleSheet("color:#7f7f7f;")
+        card_form.addRow(info)
+        credit = QLabel('Smartisan UI：<a href="https://github.com/lemonteaau/smartisan-ui-skill">lemonteaau / smartisan-ui-skill</a><br>原始设计：Paix Chan · Smartisan OS UI Kit (Unofficial) · CC BY 4.0')
+        credit.setOpenExternalLinks(True)
+        credit.setWordWrap(True)
+        credit.setObjectName("cardHint")
+        card_form.addRow(credit)
+        layout.addWidget(card); layout.addStretch()
         self._add_tab(page, "关于")
 
     def values(self):
@@ -506,8 +532,8 @@ class TabbedSettingsDialog(QDialog):
                 name, url = text.split("  ·  ", 1); shortcuts.append({"name": name, "url": url})
         result = dict(self.config)
         appearance = dict(result.get("appearance", {})); appearance.update({"panel_opacity": self.opacity.value() / 100.0, "border_radius": self.radius.value(), "accent_color": self.accent, "panel_bg_rgb": self.panel_rgb.text().strip() or "247, 249, 252"})
-        result.update({"launcher_width": self.width.value(), "launcher_height": self.height.value(), "launcher_vertical_offset": self.vertical_offset.value(), "theme": self.theme.currentText(), "color_theme": self.palette.currentText(), "appearance": appearance,
-                       "layout": self.layout_mode.currentText(), "result_density": self.density.currentText(), "font_size": self.font.value(), "show_result_descriptions": self.show_descriptions.isChecked(), "show_result_tooltips": self.show_tooltips.isChecked(),
+        result.update({"ui_style": self.ui_style.currentData(), "launcher_width": self.width.value(), "launcher_height": self.height.value(), "launcher_vertical_offset": self.vertical_offset.value(), "theme": self.theme.currentData(), "color_theme": self.palette.currentText(), "appearance": appearance,
+                       "layout": self.layout_mode.currentData(), "result_density": self.density.currentData(), "font_size": self.font.value(), "show_apps_on_open": self.show_apps_on_open.isChecked(), "show_result_descriptions": self.show_descriptions.isChecked(), "show_result_tooltips": self.show_tooltips.isChecked(),
                        "shortcut": shortcut_text, "clipboard_max_entries": self.clipboard_max.value(),
                        "clipboard_auto_expire_hours": self.clipboard_expire.value(),
                        "clipboard_max_text_length": self.clipboard_text_limit.value(),
@@ -591,7 +617,23 @@ class TabbedSettingsDialog(QDialog):
             name, url = item.text().split("  ·  ", 1)
             self.web_name.setText(name); self.web_url.setText(url)
 
+    def _apply_ui_style(self, *_):
+        config = dict(self.config, ui_style=self.ui_style.currentData(), theme=self.theme.currentData())
+        active = smartisan.is_smartisan(config)
+        self.setStyleSheet(smartisan.settings_stylesheet(smartisan.is_dark(config)) if active else self._classic_stylesheet)
+        for control in (self.palette, self.opacity, self.radius, self.accent_palette, self.panel_rgb):
+            control.setEnabled(not active)
+            control.setToolTip("Smartisan 使用统一的配色与材质；切换到 Lume 经典可自定义" if active else "")
+        self._update_theme_preview(self.palette.currentText())
+
     def _update_theme_preview(self, theme_name):
+        if self.ui_style.currentData() == "smartisan":
+            dark = smartisan.is_dark(dict(self.config, theme=self.theme.currentData()))
+            p = smartisan.palette(dark)
+            self.theme_preview.setStyleSheet(f"QFrame {{ background: {p['page']}; border: 1px solid {p['border']}; border-radius: 4px; }}")
+            self.theme_preview_text.setText("Smartisan · " + ("深色" if dark else "浅色"))
+            self.theme_preview_text.setStyleSheet(f"color: {p['accent']}; font-size: 11px;")
+            return
         theme = get_theme(theme_name) or {}
         bg = theme.get("panel_bg_rgb", "247, 249, 252")
         accent = theme.get("accent_color", "#6988b5")
